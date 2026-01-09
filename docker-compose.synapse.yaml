@@ -1,0 +1,365 @@
+version: '3.8'
+
+# ===========================================
+# SECURITY-HARDENED WorkAdventure + LiveKit + Synapse
+# ===========================================
+# Includes Matrix/Synapse for persistent chat
+# Requires: 12+ GB RAM, 80+ GB storage
+
+x-common-security: &common-security
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 100
+
+x-logging: &logging
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-resource-small: &resource-small
+  deploy:
+    resources:
+      limits:
+        cpus: '0.5'
+        memory: 256M
+      reservations:
+        cpus: '0.1'
+        memory: 64M
+
+x-resource-medium: &resource-medium
+  deploy:
+    resources:
+      limits:
+        cpus: '1.0'
+        memory: 512M
+      reservations:
+        cpus: '0.25'
+        memory: 128M
+
+x-resource-large: &resource-large
+  deploy:
+    resources:
+      limits:
+        cpus: '2.0'
+        memory: 1G
+      reservations:
+        cpus: '0.5'
+        memory: 256M
+
+x-resource-xlarge: &resource-xlarge
+  deploy:
+    resources:
+      limits:
+        cpus: '2.0'
+        memory: 2G
+      reservations:
+        cpus: '0.5'
+        memory: 512M
+
+networks:
+  workadventure:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+  traefik-public:
+    external: true
+
+volumes:
+  postgres-data:
+  redis-data:
+  synapse-data:
+  synapse-media:
+  map-storage:
+
+services:
+  # ===========================================
+  # TRAEFIK - Reverse Proxy + TLS
+  # ===========================================
+  traefik:
+    image: traefik:v3.0
+    <<: [*logging]
+    command:
+      - "--api.dashboard=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - workadventure
+      - traefik-public
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # ===========================================
+  # POSTGRESQL - Database for Synapse
+  # ===========================================
+  postgres:
+    image: postgres:15-alpine
+    <<: [*common-security, *resource-medium, *logging]
+    cap_add:
+      - DAC_READ_SEARCH
+      - SETGID
+      - SETUID
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: synapse
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    networks:
+      - workadventure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse -d synapse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ===========================================
+  # REDIS - Session Store
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    <<: [*common-security, *resource-small, *logging]
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - workadventure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # SYNAPSE - Matrix Homeserver
+  # ===========================================
+  synapse:
+    image: matrixdotorg/synapse:v1.132.0
+    <<: [*resource-xlarge, *logging]
+    entrypoint: /data/start.sh
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - synapse-data:/data
+      - synapse-media:/data/media_store
+      - ./synapse/start.sh:/data/start.sh:ro
+    environment:
+      SYNAPSE_SERVER_NAME: matrix.${DOMAIN}
+      SYNAPSE_REPORT_STATS: 'no'
+      SYNAPSE_ENABLE_REGISTRATION: 'false'
+      SYNAPSE_REGISTRATION_SHARED_SECRET: ${MATRIX_REGISTRATION_SECRET}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: synapse
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - workadventure
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.synapse.rule=Host(`matrix.${DOMAIN}`)"
+      - "traefik.http.routers.synapse.entrypoints=websecure"
+      - "traefik.http.routers.synapse.tls.certresolver=letsencrypt"
+      - "traefik.http.services.synapse.loadbalancer.server.port=8008"
+    healthcheck:
+      test: ["CMD", "curl", "-fSs", "http://localhost:8008/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ===========================================
+  # LIVEKIT - Video Server
+  # ===========================================
+  livekit:
+    image: livekit/livekit-server:v1.7
+    <<: [*resource-large, *logging]
+    command:
+      - "--bind"
+      - "0.0.0.0"
+      - "--port"
+      - "7880"
+      - "--rtc.tcp_port"
+      - "7881"
+      - "--rtc.port_range_start"
+      - "50000"
+      - "--rtc.port_range_end"
+      - "50100"
+      - "--rtc.use_external_ip"
+      - "true"
+      - "--redis.address"
+      - "redis:6379"
+      - "--redis.password"
+      - "${REDIS_PASSWORD}"
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
+    networks:
+      - workadventure
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.livekit.rule=Host(`livekit.${DOMAIN}`)"
+      - "traefik.http.routers.livekit.entrypoints=websecure"
+      - "traefik.http.routers.livekit.tls.certresolver=letsencrypt"
+      - "traefik.http.services.livekit.loadbalancer.server.port=7880"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:7880/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ===========================================
+  # PLAY - Main Application
+  # ===========================================
+  play:
+    image: thecodingmachine/workadventure-play:${VERSION:-v1.21.0}
+    <<: [*common-security, *resource-medium, *logging]
+    depends_on:
+      redis:
+        condition: service_healthy
+      back:
+        condition: service_healthy
+      livekit:
+        condition: service_healthy
+      synapse:
+        condition: service_healthy
+    environment:
+      DEBUG_MODE: 'false'
+      PLAY_URL: https://play.${DOMAIN}
+      PUBLIC_MAP_STORAGE_URL: https://map-storage.${DOMAIN}
+      INTERNAL_MAP_STORAGE_URL: http://map-storage:3000
+      SECRET_KEY: ${SECRET_KEY}
+      API_URL: back:50051
+      # LiveKit
+      LIVEKIT_URL: wss://livekit.${DOMAIN}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Matrix/Synapse
+      MATRIX_API_URI: http://synapse:8008/
+      MATRIX_PUBLIC_URI: https://matrix.${DOMAIN}
+      MATRIX_DOMAIN: matrix.${DOMAIN}
+      MATRIX_ADMIN_USER: ${MATRIX_ADMIN_USER:-admin}
+      MATRIX_ADMIN_PASSWORD: ${MATRIX_ADMIN_PASSWORD}
+      # Auth
+      ENABLE_ANONYMOUS: ${ENABLE_ANONYMOUS:-true}
+      MAX_USERS_PER_ROOM: ${MAX_USERS_PER_ROOM:-50}
+    networks:
+      - workadventure
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.play.rule=Host(`play.${DOMAIN}`)"
+      - "traefik.http.routers.play.entrypoints=websecure"
+      - "traefik.http.routers.play.tls.certresolver=letsencrypt"
+      - "traefik.http.services.play.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ===========================================
+  # BACK - API Server
+  # ===========================================
+  back:
+    image: thecodingmachine/workadventure-back:${VERSION:-v1.21.0}
+    <<: [*common-security, *resource-medium, *logging]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      SECRET_KEY: ${SECRET_KEY}
+      PLAY_URL: https://play.${DOMAIN}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      LIVEKIT_URL: wss://livekit.${DOMAIN}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      MATRIX_API_URI: http://synapse:8008/
+      MATRIX_PUBLIC_URI: https://matrix.${DOMAIN}
+      MATRIX_DOMAIN: matrix.${DOMAIN}
+      MATRIX_ADMIN_USER: ${MATRIX_ADMIN_USER:-admin}
+      MATRIX_ADMIN_PASSWORD: ${MATRIX_ADMIN_PASSWORD}
+      MAX_USERS_PER_ROOM: ${MAX_USERS_PER_ROOM:-50}
+    networks:
+      - workadventure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # MAP-STORAGE - Map Management
+  # ===========================================
+  map-storage:
+    image: thecodingmachine/workadventure-map-storage:${VERSION:-v1.21.0}
+    <<: [*common-security, *resource-small, *logging]
+    volumes:
+      - map-storage:/maps
+    environment:
+      SECRET_KEY: ${SECRET_KEY}
+      AUTHENTICATION_STRATEGY: Basic
+      AUTHENTICATION_USER: ${MAP_STORAGE_USER:-admin}
+      AUTHENTICATION_PASSWORD: ${MAP_STORAGE_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    networks:
+      - workadventure
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.map-storage.rule=Host(`map-storage.${DOMAIN}`)"
+      - "traefik.http.routers.map-storage.entrypoints=websecure"
+      - "traefik.http.routers.map-storage.tls.certresolver=letsencrypt"
+      - "traefik.http.services.map-storage.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

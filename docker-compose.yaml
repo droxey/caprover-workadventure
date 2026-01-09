@@ -1,0 +1,244 @@
+# ===========================================
+# WorkAdventure + LiveKit - Docker Compose
+# ===========================================
+# For standalone deployment (non-CapRover)
+# 
+# Usage:
+#   1. Copy .env.template to .env
+#   2. Run ./gen-secrets.sh
+#   3. Edit .env with your DOMAIN and PUBLIC_IP
+#   4. Run: docker-compose up -d
+# ===========================================
+
+version: '3.8'
+
+services:
+  # =========================================
+  # PLAY - Frontend Application
+  # =========================================
+  play:
+    image: thecodingmachine/workadventure-play:${VERSION:-v1.27.2}
+    container_name: workadventure-play
+    restart: unless-stopped
+    environment:
+      # Internal URLs
+      PUSHER_URL: http://back:8080
+      API_URL: http://back:8080
+      
+      # Public URLs
+      FRONT_URL: https://${DOMAIN}
+      PUBLIC_MAP_STORAGE_URL: https://${DOMAIN}/map-storage
+      
+      # LiveKit Configuration
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      
+      # Feature flags
+      ENABLE_MAP_EDITOR: ${ENABLE_MAP_EDITOR:-true}
+      ENABLE_CHAT: ${ENABLE_CHAT:-true}
+      DISABLE_ANONYMOUS: ${DISABLE_ANONYMOUS:-false}
+      MAX_PER_GROUP: ${MAX_PER_GROUP:-100}
+      
+      # Start room
+      START_ROOM_URL: ${START_ROOM_URL:-}
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+      
+      # Disable Jitsi (using LiveKit)
+      JITSI_URL: ""
+      JITSI_PRIVATE_MODE: "false"
+    depends_on:
+      back:
+        condition: service_started
+      livekit:
+        condition: service_started
+    networks:
+      - workadventure-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.play.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.play.entrypoints=websecure"
+      - "traefik.http.routers.play.tls.certresolver=letsencrypt"
+      - "traefik.http.services.play.loadbalancer.server.port=3000"
+
+  # =========================================
+  # BACK - API Backend
+  # =========================================
+  back:
+    image: thecodingmachine/workadventure-back:${VERSION:-v1.27.2}
+    container_name: workadventure-back
+    restart: unless-stopped
+    environment:
+      # Internal URLs
+      PLAY_URL: http://play:3000
+      MAP_STORAGE_URL: http://map-storage:3000
+      
+      # Public URLs
+      FRONT_URL: https://${DOMAIN}
+      PUBLIC_MAP_STORAGE_URL: https://${DOMAIN}/map-storage
+      
+      # LiveKit Configuration
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+      
+      # Ejabberd
+      EJABBERD_USER: ${EJABBERD_USER:-admin}
+      EJABBERD_PASSWORD: ${EJABBERD_PASSWORD}
+      EJABBERD_DOMAIN: ${DOMAIN}
+      
+      # Feature flags
+      ENABLE_CHAT: ${ENABLE_CHAT:-true}
+      MAX_PER_GROUP: ${MAX_PER_GROUP:-100}
+      MAX_USERS_PER_ROOM: 150
+      
+      # Disable Jitsi
+      JITSI_URL: ""
+    depends_on:
+      redis:
+        condition: service_started
+      livekit:
+        condition: service_started
+    networks:
+      - workadventure-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # =========================================
+  # MAP-STORAGE - Map Editor & Storage
+  # =========================================
+  map-storage:
+    image: thecodingmachine/workadventure-map-storage:${VERSION:-v1.27.2}
+    container_name: workadventure-map
+    restart: unless-stopped
+    volumes:
+      - map-data:/maps
+    environment:
+      # Authentication
+      AUTHENTICATION_STRATEGY: Basic
+      AUTHENTICATION_USER: ${MAP_STORAGE_AUTHENTICATION_USER:-admin}
+      AUTHENTICATION_PASSWORD: ${MAP_STORAGE_AUTHENTICATION_PASSWORD}
+      
+      # Internal URLs
+      API_URL: http://back:8080
+      
+      # Storage
+      STORAGE_DIRECTORY: /maps
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+    depends_on:
+      back:
+        condition: service_started
+    networks:
+      - workadventure-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # =========================================
+  # LIVEKIT - WebRTC SFU Server
+  # =========================================
+  livekit:
+    image: livekit/livekit-server:${LIVEKIT_VERSION:-v1.8.0}
+    container_name: workadventure-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    environment:
+      # CRITICAL: LIVEKIT_KEYS must have space after colon
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      # HTTP API (proxied through Traefik)
+      - "7880:7880"
+      # TCP fallback for WebRTC
+      - "7881:7881"
+      # UDP port range for WebRTC media
+      - "50000-50100:50000-50100/udp"
+    networks:
+      - workadventure-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.livekit.rule=Host(`livekit.${DOMAIN}`)"
+      - "traefik.http.routers.livekit.entrypoints=websecure"
+      - "traefik.http.routers.livekit.tls.certresolver=letsencrypt"
+      - "traefik.http.services.livekit.loadbalancer.server.port=7880"
+
+  # =========================================
+  # REDIS - Session Storage
+  # =========================================
+  redis:
+    image: redis:7-alpine
+    container_name: workadventure-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - workadventure-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  # =========================================
+  # EJABBERD - XMPP Chat Server
+  # =========================================
+  ejabberd:
+    image: ejabberd/ecs:latest
+    container_name: workadventure-ejabberd
+    restart: unless-stopped
+    volumes:
+      - ejabberd-data:/home/ejabberd/database
+    environment:
+      ERLANG_NODE_ARG: ejabberd@localhost
+      ERLANG_COOKIE: ${SECRET_KEY}
+      CTL_ON_CREATE: "register admin localhost ${EJABBERD_PASSWORD}"
+    networks:
+      - workadventure-network
+    healthcheck:
+      test: ["CMD", "ejabberdctl", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# =========================================
+# NETWORKS
+# =========================================
+networks:
+  workadventure-network:
+    driver: bridge
+
+# =========================================
+# VOLUMES
+# =========================================
+volumes:
+  map-data:
+    name: workadventure-maps
+  redis-data:
+    name: workadventure-redis
+  ejabberd-data:
+    name: workadventure-ejabberd

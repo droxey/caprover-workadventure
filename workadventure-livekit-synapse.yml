@@ -1,0 +1,437 @@
+captainVersion: 4
+caproverOneClickApp:
+  variables:
+    - id: $$cap_wa_version
+      label: WorkAdventure Version
+      defaultValue: 'v1.27.2'
+      description: WorkAdventure release tag (v1.21.0+ required for Matrix). Check https://github.com/workadventure/workadventure/releases
+      validRegex: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+    - id: $$cap_root_domain
+      label: Root Domain
+      defaultValue: 'example.com'
+      description: Your root domain. Services deployed to play.example.com, matrix.example.com, etc.
+    - id: $$cap_public_ip
+      label: Server Public IP
+      defaultValue: ''
+      description: 'REQUIRED: Your server public IP address (run: curl -4 ifconfig.me). Critical for WebRTC.'
+      validRegex: /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/
+    - id: $$cap_secret_key
+      label: Secret Key
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -hex 32'
+      validRegex: /^[a-f0-9]{64}$/
+    - id: $$cap_livekit_api_key
+      label: LiveKit API Key
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -hex 12'
+      validRegex: /^[a-f0-9]{24}$/
+    - id: $$cap_livekit_api_secret
+      label: LiveKit API Secret
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -base64 32'
+    - id: $$cap_redis_password
+      label: Redis Password
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -base64 24'
+    - id: $$cap_postgres_password
+      label: PostgreSQL Password (for Synapse)
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -base64 24'
+    - id: $$cap_matrix_admin_user
+      label: Matrix Admin Username
+      defaultValue: 'admin'
+      description: Matrix/Synapse admin username
+    - id: $$cap_matrix_admin_password
+      label: Matrix Admin Password
+      defaultValue: ''
+      description: 'REQUIRED: Matrix admin password (min 12 chars)'
+    - id: $$cap_matrix_registration_secret
+      label: Matrix Registration Secret
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -hex 32'
+      validRegex: /^[a-f0-9]{64}$/
+    - id: $$cap_map_storage_user
+      label: Map Storage Username
+      defaultValue: 'admin'
+      description: Username for map-storage basic auth
+    - id: $$cap_map_storage_password
+      label: Map Storage Password
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -base64 16'
+    - id: $$cap_enable_anonymous
+      label: Enable Anonymous Login
+      defaultValue: 'true'
+      description: Allow users without authentication
+      validRegex: /^(true|false)$/
+    - id: $$cap_max_users_per_room
+      label: Max Users Per Room
+      defaultValue: '50'
+      description: Maximum concurrent users per room
+      validRegex: /^[0-9]+$/
+
+  instructions:
+    start: |-
+      🎮 **WorkAdventure + LiveKit + Matrix/Synapse (CapRover Fixed)**
+
+      Virtual 16-bit office with persistent chat via Matrix protocol.
+      
+      **This version is fixed for CapRover compatibility!**
+
+      ---
+
+      **⚠️ IMPORTANT: This version requires MORE resources**
+
+      | Component | Without Synapse | With Synapse |
+      |-----------|-----------------|--------------|
+      | RAM | 8 GB | 12+ GB |
+      | Storage | 40 GB | 80+ GB |
+
+      ---
+
+      **1. Get your server's public IP:**
+      ```bash
+      curl -4 ifconfig.me
+      ```
+
+      **2. Generate ALL credentials:**
+
+      ```bash
+      echo "SECRET_KEY: $(openssl rand -hex 32)"
+      echo "LIVEKIT_API_KEY: $(openssl rand -hex 12)"
+      echo "LIVEKIT_API_SECRET: $(openssl rand -base64 32)"
+      echo "REDIS_PASSWORD: $(openssl rand -base64 24)"
+      echo "POSTGRES_PASSWORD: $(openssl rand -base64 24)"
+      echo "MATRIX_ADMIN_PASSWORD: $(openssl rand -base64 16)"
+      echo "MATRIX_REGISTRATION_SECRET: $(openssl rand -hex 32)"
+      echo "MAP_STORAGE_PASSWORD: $(openssl rand -base64 16)"
+      ```
+
+      ---
+
+      **DNS Records Required:**
+
+      | Subdomain | Target |
+      |-----------|--------|
+      | `play.$$cap_root_domain` | Your server IP |
+      | `matrix.$$cap_root_domain` | Your server IP |
+      | `map-storage.$$cap_root_domain` | Your server IP |
+      | `livekit.$$cap_root_domain` | Your server IP |
+
+      ---
+
+      **Firewall Ports:**
+
+      ```bash
+      sudo ufw allow 7881/tcp
+      sudo ufw allow 50000:50100/udp
+      ```
+
+    end: |-
+      ✅ **Deployment started!**
+
+      **⏱️ Wait 5-10 minutes** for Synapse to initialize its database.
+
+      ---
+
+      **🔐 REQUIRED Post-Deployment Steps:**
+
+      1. **Enable HTTPS** on ALL apps:
+         ```
+         CapRover → Apps → [app] → Enable HTTPS → Force HTTPS
+         ```
+
+      2. **Enable WebSocket Support**:
+         - $$cap_appname-play
+         - $$cap_appname-livekit
+         - $$cap_appname-synapse
+
+      3. **Initialize Synapse** (first time only):
+         ```bash
+         # SSH into your server and run:
+         docker exec srv-captain--$$cap_appname-synapse \
+           register_new_matrix_user -c /data/homeserver.yaml \
+           -u $$cap_matrix_admin_user -p YOUR_PASSWORD -a \
+           http://localhost:8008
+         ```
+
+      ---
+
+      **Your Services:**
+
+      | Service | URL | Purpose |
+      |---------|-----|---------|
+      | 🎮 Game | `https://play.$$cap_root_domain` | Main application |
+      | 💬 Matrix | `https://matrix.$$cap_root_domain` | Chat backend |
+      | 🗺️ Maps | `https://map-storage.$$cap_root_domain` | Map management |
+      | 📹 LiveKit | `https://livekit.$$cap_root_domain` | Video calls |
+
+      ---
+
+      **Verify Deployment:**
+
+      ```bash
+      # Check all containers
+      docker ps --filter "name=$$cap_appname" --format "table {{.Names}}\t{{.Status}}"
+
+      # Test Redis
+      docker exec srv-captain--$$cap_appname-redis redis-cli -a YOUR_REDIS_PASSWORD PING
+
+      # Check Synapse health
+      curl -s https://matrix.$$cap_root_domain/_matrix/client/versions
+
+      # View Synapse logs
+      docker logs srv-captain--$$cap_appname-synapse --tail 100
+      ```
+
+      ---
+
+      **Chat Features:**
+      - ✅ Persistent message history
+      - ✅ Offline message delivery
+      - ✅ Email notifications (configure SMTP)
+      - ✅ Connect from Element app
+
+      ---
+
+      📚 WorkAdventure Docs: https://docs.workadventu.re/
+      📚 Matrix/Synapse Docs: https://matrix-org.github.io/synapse/
+
+  displayName: WorkAdventure + LiveKit + Synapse (CapRover Fixed)
+  isOfficial: false
+  description: CapRover-compatible virtual office with LiveKit video AND Matrix/Synapse persistent chat. Requires 12+ GB RAM.
+  documentation: https://github.com/workadventure/workadventure
+
+services:
+  # ============================================
+  # POSTGRESQL - Database for Synapse
+  # ============================================
+  # NOTE: postgres:alpine natively supports POSTGRES_PASSWORD env var
+  $$cap_appname-postgres:
+    caproverExtra:
+      notExposeAsWebApp: true
+    image: postgres:15-alpine
+    restart: always
+    volumes:
+      - $$cap_appname-postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: synapse
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: $$cap_postgres_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+
+  # ============================================
+  # REDIS - Using Bitnami image (supports env var password)
+  # ============================================
+  # NOTE: We use Bitnami Redis because it natively supports
+  # REDIS_PASSWORD via environment variable, unlike redis:alpine
+  # which requires command-line args (ignored by CapRover)
+  $$cap_appname-redis:
+    caproverExtra:
+      notExposeAsWebApp: true
+    image: bitnami/redis:7.2
+    restart: always
+    volumes:
+      - $$cap_appname-redis-data:/bitnami/redis/data
+    environment:
+      REDIS_PASSWORD: $$cap_redis_password
+      REDIS_AOF_ENABLED: 'no'
+      ALLOW_EMPTY_PASSWORD: 'no'
+
+  # ============================================
+  # SYNAPSE - Matrix Homeserver
+  # ============================================
+  $$cap_appname-synapse:
+    caproverExtra:
+      containerHttpPort: 8008
+      websocketSupport: 'true'
+    image: matrixdotorg/synapse:v1.132.0
+    restart: always
+    depends_on:
+      - $$cap_appname-postgres
+      - $$cap_appname-redis
+    volumes:
+      - $$cap_appname-synapse-data:/data
+    environment:
+      SYNAPSE_SERVER_NAME: matrix.$$cap_root_domain
+      SYNAPSE_REPORT_STATS: 'no'
+      SYNAPSE_CONFIG_DIR: /data
+      SYNAPSE_DATA_DIR: /data
+      SYNAPSE_LOG_LEVEL: INFO
+      # Database
+      POSTGRES_HOST: srv-captain--$$cap_appname-postgres
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: synapse
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: $$cap_postgres_password
+      # Redis for workers (future scaling)
+      REDIS_HOST: srv-captain--$$cap_appname-redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: $$cap_redis_password
+      # Registration
+      SYNAPSE_REGISTRATION_SHARED_SECRET: $$cap_matrix_registration_secret
+      SYNAPSE_ENABLE_REGISTRATION: 'false'
+      # Admin
+      SYNAPSE_ADMIN_USER: $$cap_matrix_admin_user
+      SYNAPSE_ADMIN_PASSWORD: $$cap_matrix_admin_password
+
+  # ============================================
+  # LIVEKIT - Video Server
+  # ============================================
+  # NOTE: We use LIVEKIT_CONFIG env var with embedded YAML
+  # because CapRover ignores 'command' arguments
+  $$cap_appname-livekit:
+    caproverExtra:
+      containerHttpPort: 7880
+      websocketSupport: 'true'
+    image: livekit/livekit-server:v1.8
+    restart: always
+    ports:
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
+    environment:
+      LIVEKIT_KEYS: "$$cap_livekit_api_key: $$cap_livekit_api_secret"
+      LIVEKIT_CONFIG: |
+        port: 7880
+        bind_addresses:
+          - 0.0.0.0
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: true
+          node_ip: $$cap_public_ip
+        redis:
+          address: srv-captain--$$cap_appname-redis:6379
+          password: $$cap_redis_password
+        room:
+          enabled_codecs:
+            - mime: audio/opus
+            - mime: video/VP8
+            - mime: video/H264
+          max_participants: $$cap_max_users_per_room
+          empty_timeout: 300
+          departure_timeout: 30
+        logging:
+          level: info
+          json: true
+        limit:
+          num_tracks: 50
+          max_participant_bitrate: 3000000
+          subscription_limit_video: 25
+          subscription_limit_audio: 100
+        turn:
+          enabled: true
+          udp_port: 3478
+          tls_port: 5349
+
+  # ============================================
+  # PLAY - Main Application
+  # ============================================
+  $$cap_appname-play:
+    caproverExtra:
+      containerHttpPort: 3000
+      websocketSupport: 'true'
+    image: thecodingmachine/workadventure-play:$$cap_wa_version
+    restart: always
+    depends_on:
+      - $$cap_appname-redis
+      - $$cap_appname-back
+      - $$cap_appname-livekit
+      - $$cap_appname-synapse
+    environment:
+      # Core Settings
+      DEBUG_MODE: 'false'
+      PLAY_URL: https://play.$$cap_root_domain
+      PUBLIC_MAP_STORAGE_URL: https://map-storage.$$cap_root_domain
+      INTERNAL_MAP_STORAGE_URL: http://srv-captain--$$cap_appname-map-storage:3000
+      SECRET_KEY: $$cap_secret_key
+      API_URL: srv-captain--$$cap_appname-back:50051
+      
+      # LiveKit
+      LIVEKIT_URL: wss://livekit.$$cap_root_domain
+      LIVEKIT_API_KEY: $$cap_livekit_api_key
+      LIVEKIT_API_SECRET: $$cap_livekit_api_secret
+      
+      # Redis
+      REDIS_HOST: srv-captain--$$cap_appname-redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: $$cap_redis_password
+      
+      # Matrix/Synapse Integration
+      MATRIX_API_URI: http://srv-captain--$$cap_appname-synapse:8008/
+      MATRIX_PUBLIC_URI: https://matrix.$$cap_root_domain
+      MATRIX_DOMAIN: matrix.$$cap_root_domain
+      MATRIX_ADMIN_USER: $$cap_matrix_admin_user
+      MATRIX_ADMIN_PASSWORD: $$cap_matrix_admin_password
+      
+      # Authentication
+      ENABLE_OPENID: 'false'
+      ENABLE_ANONYMOUS: $$cap_enable_anonymous
+      
+      # Limits
+      MAX_USERS_PER_ROOM: $$cap_max_users_per_room
+      MAX_PER_GROUP: '4'
+      
+      # Security
+      SECURITY_EMAIL: admin@$$cap_root_domain
+
+  # ============================================
+  # BACK - API Server
+  # ============================================
+  $$cap_appname-back:
+    caproverExtra:
+      notExposeAsWebApp: true
+    image: thecodingmachine/workadventure-back:$$cap_wa_version
+    restart: always
+    depends_on:
+      - $$cap_appname-redis
+    environment:
+      SECRET_KEY: $$cap_secret_key
+      PLAY_URL: https://play.$$cap_root_domain
+      
+      # Redis
+      REDIS_HOST: srv-captain--$$cap_appname-redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: $$cap_redis_password
+      
+      # LiveKit
+      LIVEKIT_URL: wss://livekit.$$cap_root_domain
+      LIVEKIT_API_KEY: $$cap_livekit_api_key
+      LIVEKIT_API_SECRET: $$cap_livekit_api_secret
+      
+      # Matrix
+      MATRIX_API_URI: http://srv-captain--$$cap_appname-synapse:8008/
+      MATRIX_PUBLIC_URI: https://matrix.$$cap_root_domain
+      MATRIX_DOMAIN: matrix.$$cap_root_domain
+      MATRIX_ADMIN_USER: $$cap_matrix_admin_user
+      MATRIX_ADMIN_PASSWORD: $$cap_matrix_admin_password
+      
+      # Limits
+      MAX_USERS_PER_ROOM: $$cap_max_users_per_room
+
+  # ============================================
+  # MAP-STORAGE - Map Management
+  # ============================================
+  $$cap_appname-map-storage:
+    caproverExtra:
+      containerHttpPort: 3000
+    image: thecodingmachine/workadventure-map-storage:$$cap_wa_version
+    restart: always
+    depends_on:
+      - $$cap_appname-redis
+    volumes:
+      - $$cap_appname-maps:/maps
+    environment:
+      SECRET_KEY: $$cap_secret_key
+      AUTHENTICATION_STRATEGY: Basic
+      AUTHENTICATION_USER: $$cap_map_storage_user
+      AUTHENTICATION_PASSWORD: $$cap_map_storage_password
+      REDIS_HOST: srv-captain--$$cap_appname-redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: $$cap_redis_password
+
+volumes:
+  $$cap_appname-postgres-data:
+  $$cap_appname-redis-data:
+  $$cap_appname-synapse-data:
+  $$cap_appname-maps:

@@ -1,0 +1,120 @@
+# Synapse Homeserver Configuration for WorkAdventure
+# =================================================
+# This is a template. The startup script will substitute variables.
+
+server_name: "${MATRIX_DOMAIN}"
+pid_file: /data/homeserver.pid
+public_baseurl: "https://${MATRIX_DOMAIN}/"
+
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: true
+    bind_addresses: ['0.0.0.0']
+    resources:
+      - names: [client, federation]
+        compress: false
+
+# Database configuration (PostgreSQL)
+database:
+  name: psycopg2
+  txn_limit: 10000
+  args:
+    user: "${POSTGRES_USER}"
+    password: "${POSTGRES_PASSWORD}"
+    database: "${POSTGRES_DB}"
+    host: "${POSTGRES_HOST}"
+    port: ${POSTGRES_PORT}
+    cp_min: 5
+    cp_max: 10
+
+# Logging
+log_config: "/data/log.config"
+
+# Media storage
+media_store_path: /data/media_store
+max_upload_size: 50M
+max_image_pixels: 32M
+
+# URL previews
+url_preview_enabled: true
+url_preview_ip_range_blacklist:
+  - '127.0.0.0/8'
+  - '10.0.0.0/8'
+  - '172.16.0.0/12'
+  - '192.168.0.0/16'
+  - '100.64.0.0/10'
+  - '192.0.0.0/24'
+  - '169.254.0.0/16'
+  - '192.88.99.0/24'
+  - '198.18.0.0/15'
+  - '192.0.2.0/24'
+  - '198.51.100.0/24'
+  - '203.0.113.0/24'
+  - '224.0.0.0/4'
+  - '::1/128'
+  - 'fe80::/10'
+  - 'fc00::/7'
+  - '2001:db8::/32'
+  - 'ff00::/8'
+  - 'fec0::/10'
+
+# Registration
+enable_registration: false
+registration_shared_secret: "${SYNAPSE_REGISTRATION_SHARED_SECRET}"
+
+# Metrics (disabled by default)
+enable_metrics: false
+
+# Room settings
+enable_room_list_search: true
+
+# Message retention (keep messages for 180 days)
+retention:
+  enabled: true
+  default_policy:
+    min_lifetime: 1d
+    max_lifetime: 180d
+
+# Rate limiting (relaxed for WorkAdventure)
+rc_message:
+  per_second: 10
+  burst_count: 50
+
+rc_registration:
+  per_second: 0.5
+  burst_count: 5
+
+rc_login:
+  address:
+    per_second: 0.5
+    burst_count: 5
+  account:
+    per_second: 0.5
+    burst_count: 5
+  failed_attempts:
+    per_second: 0.5
+    burst_count: 5
+
+# Federation (disabled for hackathon use - enable if needed)
+federation_domain_whitelist: []
+
+# Trusted key servers
+trusted_key_servers:
+  - server_name: "matrix.org"
+
+# Signing key
+signing_key_path: "/data/signing.key"
+
+# Report stats to matrix.org
+report_stats: false
+
+# Macaroon secret key (auto-generated)
+macaroon_secret_key: "${MACAROON_SECRET_KEY}"
+
+# Form secret (auto-generated)
+form_secret: "${FORM_SECRET}"
+
+# Suppress key server warning
+suppress_key_server_warning: true

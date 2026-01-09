@@ -1,0 +1,338 @@
+captainVersion: 4
+caproverOneClickApp:
+  variables:
+    - id: $$cap_wa_version
+      label: WorkAdventure Version
+      defaultValue: 'v1.27.2'
+      description: WorkAdventure release tag. v1.27.2+ fixes audio device bugs. Check https://github.com/workadventure/workadventure/releases
+      validRegex: /^v[0-9]+\.[0-9]+\.[0-9]+$/
+    - id: $$cap_root_domain
+      label: Root Domain
+      defaultValue: 'example.com'
+      description: Your root domain (e.g., example.com). Services will be deployed to play.example.com, livekit.example.com, etc.
+    - id: $$cap_public_ip
+      label: Server Public IP
+      defaultValue: ''
+      description: 'REQUIRED: Your server public IP address (run: curl -4 ifconfig.me). Critical for WebRTC.'
+      validRegex: /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/
+    - id: $$cap_secret_key
+      label: Secret Key
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -hex 32'
+      validRegex: /^[a-f0-9]{64}$/
+    - id: $$cap_livekit_api_key
+      label: LiveKit API Key
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -hex 12'
+      validRegex: /^[a-f0-9]{24}$/
+    - id: $$cap_livekit_api_secret
+      label: LiveKit API Secret
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -base64 32'
+    - id: $$cap_redis_password
+      label: Redis Password
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -base64 24'
+    - id: $$cap_map_storage_user
+      label: Map Storage Username
+      defaultValue: 'admin'
+      description: Username for map-storage basic auth
+    - id: $$cap_map_storage_password
+      label: Map Storage Password
+      defaultValue: ''
+      description: 'REQUIRED: Generate with: openssl rand -base64 16'
+    - id: $$cap_enable_anonymous
+      label: Enable Anonymous Login
+      defaultValue: 'true'
+      description: Allow users without authentication. Set to false for OIDC-only.
+      validRegex: /^(true|false)$/
+    - id: $$cap_max_users_per_room
+      label: Max Users Per Room
+      defaultValue: '50'
+      description: Maximum concurrent users per room
+      validRegex: /^[0-9]+$/
+
+  instructions:
+    start: |-
+      🎮 **WorkAdventure + LiveKit (CapRover Fixed)**
+
+      Virtual 16-bit office space with high-quality video conferencing.
+      
+      **This version is fixed for CapRover compatibility!**
+
+      ---
+
+      **⚠️ BEFORE YOU CONTINUE:**
+
+      1. Get your server's public IP:
+      ```bash
+      curl -4 ifconfig.me
+      ```
+
+      2. Generate all required credentials:
+      ```bash
+      echo "SECRET_KEY: $(openssl rand -hex 32)"
+      echo "LIVEKIT_API_KEY: $(openssl rand -hex 12)"
+      echo "LIVEKIT_API_SECRET: $(openssl rand -base64 32)"
+      echo "REDIS_PASSWORD: $(openssl rand -base64 24)"
+      echo "MAP_STORAGE_PASSWORD: $(openssl rand -base64 16)"
+      ```
+
+      ---
+
+      **DNS Records Required:**
+
+      Create A records pointing to your CapRover server:
+
+      | Subdomain | Target |
+      |-----------|--------|
+      | `play.$$cap_root_domain` | Your server IP |
+      | `map-storage.$$cap_root_domain` | Your server IP |
+      | `livekit.$$cap_root_domain` | Your server IP |
+
+      ---
+
+      **Firewall Ports Required:**
+
+      ```bash
+      sudo ufw allow 7881/tcp   # LiveKit WebRTC TCP
+      sudo ufw allow 50000:50100/udp  # LiveKit WebRTC UDP
+      ```
+
+    end: |-
+      ✅ **Deployment started!**
+
+      Wait 3-5 minutes for all containers to initialize.
+
+      ---
+
+      **🔐 REQUIRED Post-Deployment Steps:**
+
+      1. **Enable HTTPS** on ALL apps:
+         ```
+         CapRover → Apps → [app] → Enable HTTPS → Force HTTPS
+         ```
+
+      2. **Enable WebSocket Support**:
+         ```
+         Apps → $$cap_appname-play → HTTP Settings → WebSocket Support: ON
+         Apps → $$cap_appname-livekit → HTTP Settings → WebSocket Support: ON
+         ```
+
+      3. **Verify firewall ports** on host:
+         ```bash
+         sudo ufw allow 7881/tcp
+         sudo ufw allow 50000:50100/udp
+         ```
+
+      ---
+
+      **Your Services:**
+
+      | Service | URL |
+      |---------|-----|
+      | 🎮 Game | `https://play.$$cap_root_domain` |
+      | 🗺️ Maps | `https://map-storage.$$cap_root_domain` |
+      | 📹 LiveKit | `https://livekit.$$cap_root_domain` |
+
+      **Map Storage Login:**
+      - Username: `$$cap_map_storage_user`
+      - Password: (your configured password)
+
+      ---
+
+      **Verify Deployment:**
+
+      ```bash
+      # Check container status
+      docker ps --filter "name=$$cap_appname" --format "table {{.Names}}\t{{.Status}}"
+
+      # Test Redis connection
+      docker exec srv-captain--$$cap_appname-redis redis-cli -a YOUR_REDIS_PASSWORD PING
+
+      # View logs
+      docker logs srv-captain--$$cap_appname-play 2>&1 | tail -50
+      ```
+
+      ---
+
+      📚 Docs: https://docs.workadventu.re/
+      🐛 Issues: https://github.com/workadventure/workadventure/issues
+
+  displayName: WorkAdventure + LiveKit (CapRover Fixed)
+  isOfficial: false
+  description: CapRover-compatible 16-bit virtual office with LiveKit video. Uses Bitnami Redis and embedded LiveKit config for full compatibility.
+  documentation: https://github.com/workadventure/workadventure
+
+services:
+  # ============================================
+  # REDIS - Using Bitnami image (supports env var password)
+  # ============================================
+  # NOTE: We use Bitnami Redis because it natively supports
+  # REDIS_PASSWORD via environment variable, unlike redis:alpine
+  # which requires command-line args (ignored by CapRover)
+  $$cap_appname-redis:
+    caproverExtra:
+      notExposeAsWebApp: true
+    image: bitnami/redis:7.2
+    restart: always
+    volumes:
+      - $$cap_appname-redis-data:/bitnami/redis/data
+    environment:
+      # Bitnami Redis reads password from this env var automatically
+      REDIS_PASSWORD: $$cap_redis_password
+      # Disable AOF for better performance (optional)
+      REDIS_AOF_ENABLED: 'no'
+      # Allow empty password = no (require auth)
+      ALLOW_EMPTY_PASSWORD: 'no'
+
+  # ============================================
+  # LIVEKIT - Video Conferencing Server
+  # ============================================
+  # NOTE: We use LIVEKIT_CONFIG env var with embedded YAML
+  # because CapRover ignores 'command' arguments
+  $$cap_appname-livekit:
+    caproverExtra:
+      containerHttpPort: 7880
+      websocketSupport: 'true'
+    image: livekit/livekit-server:v1.8
+    restart: always
+    ports:
+      - "7881:7881"
+      - "50000-50100:50000-50100/udp"
+    environment:
+      # API Keys - LiveKit reads this directly
+      LIVEKIT_KEYS: "$$cap_livekit_api_key: $$cap_livekit_api_secret"
+      # Embedded YAML config - this is the fix for CapRover!
+      # LiveKit reads full config from this env var
+      LIVEKIT_CONFIG: |
+        port: 7880
+        bind_addresses:
+          - 0.0.0.0
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: true
+          node_ip: $$cap_public_ip
+        redis:
+          address: srv-captain--$$cap_appname-redis:6379
+          password: $$cap_redis_password
+        room:
+          enabled_codecs:
+            - mime: audio/opus
+            - mime: video/VP8
+            - mime: video/H264
+          max_participants: $$cap_max_users_per_room
+          empty_timeout: 300
+          departure_timeout: 30
+        logging:
+          level: info
+          json: true
+        limit:
+          num_tracks: 50
+          max_participant_bitrate: 3000000
+          subscription_limit_video: 25
+          subscription_limit_audio: 100
+        turn:
+          enabled: true
+          udp_port: 3478
+          tls_port: 5349
+
+  # ============================================
+  # PLAY - Main Application (Frontend)
+  # ============================================
+  $$cap_appname-play:
+    caproverExtra:
+      containerHttpPort: 3000
+      websocketSupport: 'true'
+    image: thecodingmachine/workadventure-play:$$cap_wa_version
+    restart: always
+    depends_on:
+      - $$cap_appname-redis
+      - $$cap_appname-back
+      - $$cap_appname-livekit
+    environment:
+      # Core Settings
+      DEBUG_MODE: 'false'
+      PLAY_URL: https://play.$$cap_root_domain
+      PUBLIC_MAP_STORAGE_URL: https://map-storage.$$cap_root_domain
+      INTERNAL_MAP_STORAGE_URL: http://srv-captain--$$cap_appname-map-storage:3000
+      SECRET_KEY: $$cap_secret_key
+      API_URL: srv-captain--$$cap_appname-back:50051
+      
+      # LiveKit Configuration
+      LIVEKIT_URL: wss://livekit.$$cap_root_domain
+      LIVEKIT_API_KEY: $$cap_livekit_api_key
+      LIVEKIT_API_SECRET: $$cap_livekit_api_secret
+      
+      # Redis (Bitnami uses standard port 6379)
+      REDIS_HOST: srv-captain--$$cap_appname-redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: $$cap_redis_password
+      
+      # Authentication
+      ENABLE_OPENID: 'false'
+      ENABLE_ANONYMOUS: $$cap_enable_anonymous
+      
+      # Limits
+      MAX_USERS_PER_ROOM: $$cap_max_users_per_room
+      MAX_PER_GROUP: '4'
+      
+      # Security
+      SECURITY_EMAIL: admin@$$cap_root_domain
+      DISABLE_NOTIFICATIONS: 'false'
+
+  # ============================================
+  # BACK - API Server
+  # ============================================
+  $$cap_appname-back:
+    caproverExtra:
+      notExposeAsWebApp: true
+    image: thecodingmachine/workadventure-back:$$cap_wa_version
+    restart: always
+    depends_on:
+      - $$cap_appname-redis
+    environment:
+      SECRET_KEY: $$cap_secret_key
+      PLAY_URL: https://play.$$cap_root_domain
+      
+      # Redis
+      REDIS_HOST: srv-captain--$$cap_appname-redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: $$cap_redis_password
+      
+      # LiveKit
+      LIVEKIT_URL: wss://livekit.$$cap_root_domain
+      LIVEKIT_API_KEY: $$cap_livekit_api_key
+      LIVEKIT_API_SECRET: $$cap_livekit_api_secret
+      
+      # Limits
+      MAX_USERS_PER_ROOM: $$cap_max_users_per_room
+
+  # ============================================
+  # MAP-STORAGE - Map Management
+  # ============================================
+  $$cap_appname-map-storage:
+    caproverExtra:
+      containerHttpPort: 3000
+    image: thecodingmachine/workadventure-map-storage:$$cap_wa_version
+    restart: always
+    depends_on:
+      - $$cap_appname-redis
+    volumes:
+      - $$cap_appname-maps:/maps
+    environment:
+      SECRET_KEY: $$cap_secret_key
+      AUTHENTICATION_STRATEGY: Basic
+      AUTHENTICATION_USER: $$cap_map_storage_user
+      AUTHENTICATION_PASSWORD: $$cap_map_storage_password
+      
+      # Redis
+      REDIS_HOST: srv-captain--$$cap_appname-redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: $$cap_redis_password
+
+volumes:
+  $$cap_appname-redis-data:
+  $$cap_appname-maps:
