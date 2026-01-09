@@ -228,7 +228,7 @@ services:
   $$cap_appname-redis:
     caproverExtra:
       notExposeAsWebApp: true
-    image: bitnami/redis:7.4
+    image: bitnami/redis:latest
     restart: always
     volumes:
       - $$cap_appname-redis-data:/bitnami/redis/data

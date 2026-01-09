@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:hub.docker.com)",
+      "WebSearch",
+      "WebFetch(domain:gallery.ecr.aws)",
+      "Bash(docker manifest inspect postgres:15-alpine)",
+      "Bash(docker manifest inspect bitnami/redis:7.4.3-0)",
+      "Bash(docker manifest inspect matrixdotorg/synapse:v1.132.0)",
+      "Bash(docker manifest inspect:*)"
+    ]
+  }
+}
